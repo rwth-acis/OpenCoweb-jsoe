@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Module>
+	<ModulePrefs title="IWC Editor" description="A collaborative text editor realized with ROLE IWC." author="Petru Nicolaescu, Chair for Computer Science 5, RWTH Aachen University, Germany" author_email="nicolaescu@dbis.rwth-aachen.de" width="530" height="420">
+		<Require feature="opensocial-0.8" />
+		<Require feature="openapp" />
+		<Require feature="dynamic-height"/> 
+			<OAuth>
+				<Service name="openapp" xmlns:openapp="http://www.role-project.eu/xml/openapp/opensocialext/"
+					openapp:service="http://purl.org/role/terms/spaceService"
+					openapp:permitReadAppend="http://purl.org/role/terms/data">
+					<Request method="" url=""/>
+					<Authorization url=""/>
+					<Access method="" url=""/>
+				</Service>
+			</OAuth>
+	</ModulePrefs>
+	<Content type="html">
+	<![CDATA[
+	
+		<style type="text/css">
+		textarea#editArea {
+			height: 260px;
+			width: 260px;
+			border: 3px solid #cccccc;
+			padding: 5px;
+			font-family: Tahoma, sans-serif;
+			}
+			
+		
+
+		#textDiv ul
+		{
+			margin-left: 0;
+			padding-left: 0;
+			list-style-type: none;
+			font-family: Arial, Helvetica, sans-serif;
+		}
+
+		#textDiv li
+		{
+			display: inline;
+			padding: 3px;
+			width: 240px;
+			background-color: #fff;
+			border-bottom: 1px solid #eee;
+		}
+
+		
+		#textDiv li:hover
+		{
+			background-color: #A9F691;
+			color: #000;
+		}
+		
+		#messageBox{
+			position: absolute;
+			width: 70px;
+			height: 20px;
+			z-index: 1;
+			background-color: #fff;
+			border-width: 1px;
+			display:none;
+		}
+
+	
+		#contents{
+			width: 100%;
+			height: auto;
+			z-index: 2;
+			font-size:0.675em;
+			font-family: Arial, Helvetica, sans-serif;
+		}
+		
+			
+		</style>
+	<script type="text/javascript" src="http://dbis.rwth-aachen.de/~jahns/fw/iwc/iwc.js"></script>
+	<script type="text/javascript" src="http://dbis.rwth-aachen.de/~jahns/fw/jsoe/config.js"></script>
+	<script src="//ajax.googleapis.com/ajax/libs/dojo/1.8.3/dojo/dojo.js"></script>
+	<script type="text/javascript" src="http://dbis.rwth-aachen.de/~jahns/fw/jsoe/main.js"></script>
+
+  <script src="http://open-app.googlecode.com/files/openapp.js"></script>
+  <script src="http://ajax.googleapis.com/ajax/libs/jquery/1.7/jquery.min.js"></script>
+		
+	
+		<div id="messageBox">
+			<div id="contents"></div>
+		</div>
+		
+		<div id="textDiv">			
+			<label>Title </label>	<br/>
+			<li id='documentTitle'> </li> <br/>
+			<label >Text</label> <br/>
+			<textarea id="editArea" name="editArea" disabled="true"></textarea> 
+			
+			
+		</div>
+	
+	
+						
+		<div id='stats'></div>
+		
+		
+	]]>
+	</Content>
+</Module>

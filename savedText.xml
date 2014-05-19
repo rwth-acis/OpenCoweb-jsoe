@@ -1,0 +1,622 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Module>
+	<ModulePrefs title="IWC Editor Save" description="IWC Collaborative Editor Persistence Widget" author="Petru Nicolaescu, Chair for Computer Science 5, RWTH Aachen University, Germany" author_email="nicolaescu@dbis.rwth-aachen.de" width="530" height="420">
+		<Require feature="opensocial-0.8" />
+		<Require feature="openapp" />
+		<Require feature="dynamic-height"/> 
+			<OAuth>
+				<Service name="openapp" xmlns:openapp="http://www.role-project.eu/xml/openapp/opensocialext/"
+					openapp:service="http://purl.org/role/terms/spaceService"
+					openapp:permitReadAppend="http://purl.org/role/terms/data">
+					<Request method="" url=""/>
+					<Authorization url=""/>
+					<Access method="" url=""/>
+				</Service>
+			</OAuth>
+	</ModulePrefs>
+	<Content type="html">
+	<![CDATA[
+	
+		<style type="text/css">
+		textarea#editArea {
+			height: 260px;
+			width: 260px;
+			border: 3px solid #cccccc;
+			padding: 5px;
+			font-family: Tahoma, sans-serif;
+			}
+			
+		#textDiv { width: 260px; }
+
+		#textDiv ul
+		{
+			margin-left: 0;
+			padding-left: 0;
+			list-style-type: none;
+			font-family: Arial, Helvetica, sans-serif;
+		}
+
+		#textDiv li
+		{
+			display: inline;
+			padding: 3px;
+			width: 240px;
+			background-color: #fff;
+			border-bottom: 1px solid #eee;
+		}
+
+		
+		#textDiv li:hover
+		{
+			background-color: #A9F691;
+			color: #000;
+		}
+		
+		#messageBox{
+			position: absolute;
+			width: 70px;
+			height: 20px;
+			z-index: 1;
+			background-color: #fff;
+			border-width: 1px;
+			display:none;
+		}
+
+	
+		#contents{
+			width: 100%;
+			height: auto;
+			z-index: 2;
+			font-size:0.675em;
+			font-family: Arial, Helvetica, sans-serif;
+		}
+		
+		
+		input { display:block; }
+        input.text { margin-bottom:6px; width:65%; padding: .2em; }
+        fieldset { padding:0; border:0; margin-top:25px; }
+        .ui-dialog .ui-state-error { padding: .3em; }
+        .validateTips { border: 1px solid transparent; padding: 0.3em; }
+			
+		</style>
+		
+		<link rel="stylesheet" href="http://code.jquery.com/ui/1.9.2/themes/base/jquery-ui.css" />		
+			
+	
+		<script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/1.7.1/jquery.min.js"></script>
+		<script src="http://ajax.googleapis.com/ajax/libs/jqueryui/1.8/jquery-ui.min.js"></script>
+		<script type="text/javascript" src="http://dbis.rwth-aachen.de/gadgets/iwc/lib/iwc.js"></script>
+	
+
+		
+		
+		<script type="text/javascript">
+	
+			var iwcClient;
+			
+			var stats = {};
+			
+			var context;
+			var members;
+			var membersNumber;
+			var user;
+			
+			var connection = null;
+			var collaborators ;
+			collaborators = [];
+		
+			this.jid_map = {};
+			
+		
+			//variable used for referencing the openApp space
+			var space;
+			
+			NS = {};
+			NS.sioc = "http://rdfs.org/sioc/ns#";
+			NS.ex = "http://dbis.rwth-aachen.de/~nicolaescu/fw/editor/rdf/";
+			
+			
+			
+			var actionbuffer = [];
+			var actionbufferlength = 1;
+			var actionbufferflushdelay = 5000;
+			
+			var t = 0;
+			
+			
+			
+			/**
+				Initialize:
+					*the current user, 
+					*the vector of users which are members in the same space
+					*the previously saved text (using openApp)
+			*/
+			openapp.resource.get(openapp.param.space(), (function(s) {
+				context = s;
+					
+				
+				preloadMembers(function(){
+					openapp.resource.get(openapp.param.user(), (function(u) {
+						user = u;
+										
+						newGetUsers();
+						
+						loadExistingText();
+						
+						init();
+						
+						
+						//console.log("The members are at this stage:"+members);
+					}));
+				});
+				
+						
+			}));			
+			
+			
+			
+			/**
+			* Push an action into the action buffer
+			*/
+			function push_action(action){
+				actionbuffer.push(action);
+			}
+			
+			function flush_actions(){
+				
+				// when we flush, we first clear the delay timer, if running.
+				clearTimeout(t);
+				t=0;
+				
+				// then, we package all buffered actions into one intent.
+				if(actionbuffer.length > 0){
+					
+					
+					actionbuffer = [];
+				
+					var intents = {
+						"component":"",					
+						"action":"ACTION_WRITE",
+						"data":"",
+						"dataType":"text/plain",
+						"flags":["PUBLISH_GLOBAL"],
+						"extras": {
+							"expeditors": expeditor,
+							"names":opName,
+							"positions": opPosition,
+							"characters": opCharacter,
+							"states":stateVector,
+							"prioritys" : opPriority
+						}
+					};
+					sendIntent(intents);
+					
+				}
+			}
+			
+			/**
+			* Function used for displaying the information message (click the saved text from 
+			* a list element to edit it 
+			*/
+			function show(obj,msg){
+				document.getElementById("messageBox").style.top=obj.offsetTop
+				document.getElementById("messageBox").style.left=obj.offsetLeft+obj.offsetWidth+5
+				document.getElementById("contents").innerHTML = msg;
+				document.getElementById("messageBox").style.display="block"
+			}
+			
+			/**
+			* Initializations and behavior specification for IWC Client, events, handlers, etc. 
+			*/
+			function init(){
+				
+				$(document).ready(function() {
+				iwcClient = new iwc.Client();
+				
+				var iwcCallback = function(intent){
+				console.log("******** IWC WRITE *************************");
+				console.log(intent);
+				console.log("********************************************");
+				
+				//handle write actions
+				if(intent.action == "ACTION_DATA_SAVED" 
+					){
+					if(intent.sender.indexOf("@") > -1){
+				window.location.reload();
+						
+						}
+					}
+				}
+				
+				iwcClient.connect(iwcCallback);
+	
+				
+	
+					//list of saved text
+					$("#textDiv li").live('click',function(){
+						loadExistingTextFromUri($(this).attr('id'));
+						
+					}) ;
+					$("#textDiv li").live('mouseover',function(){
+						show(this,'click to edit');
+					}) ;
+					
+					$("#textDiv li").live('mouseout',function(){
+						document.getElementById("messageBox").style.display='none';
+					}) ;
+					
+					
+					/*
+					$('#save').click(function () {
+						publishLiteral();
+
+					});
+
+					$('#delete').click(function () {
+						deleteLiterals();
+
+					}); */
+			var name = $( "#texttitle" ),
+				allFields = $( [] ).add( name );
+                tips = $( ".validateTips" );
+ 
+        function updateTips( t ) {
+            tips
+                .text( t )
+                .addClass( "ui-state-highlight" );
+            setTimeout(function() {
+                tips.removeClass( "ui-state-highlight", 1500 );
+            }, 500 );
+        }
+ 
+        function checkLength( o, n, min, max ) {
+            if ( o.val().length > max || o.val().length < min ) {
+                o.addClass( "ui-state-error" );
+                updateTips( "Length of " + n + " must be between " +
+                    min + " and " + max + "." );
+                return false;
+            } else {
+                return true;
+            }
+        }
+ 
+        $( "#dialog-form" ).dialog({
+            autoOpen: false,
+            height: 300,
+            width: 350,
+            modal: true,
+            buttons: {
+                "Create": function() {
+                    var bValid = true;
+                    allFields.removeClass( "ui-state-error" );
+ 
+                    bValid = bValid && checkLength( name, "texttitle", 3, 16 );
+                         alert(name.val());          
+                    
+                    if ( bValid ) {
+						publishLiteral(name.val());
+                       
+                        $( this ).dialog( "close" );
+                    }
+                },
+                Cancel: function() {
+                    $( this ).dialog( "close" );
+                }
+            },
+            close: function() {
+                allFields.val( "" ).removeClass( "ui-state-error" );
+            }
+        });
+			
+			});
+
+			}
+						
+		
+			
+			/**
+			* Send the local operation which was typed (name[insert/delete],position, character), state vector and priority vector
+			* 
+			*/
+			function sendOperation(op, pos, chr) {
+			
+				var a = {
+						"expeditor": user.uri,
+						"name":op,
+						"position": pos,
+						"character": chr,
+						"state":state
+					};
+				
+				push_action(a);
+
+			}
+
+						
+			/**
+			* Function used to delete a resource by its uri, using openApp
+			*/
+			function deleteEntity(uri){
+				openapp.resource.del(uri);
+				window.location.reload();
+			
+			}
+			
+			/**
+			* Function used for sending an intent via the iwc client
+			*/
+			function sendIntent(intent) {
+				if(iwc.util.validateIntent(intent)) {
+					iwcClient.publish(intent);
+				}
+				else {
+					alert("Intent not valid!");
+				}
+			}
+			
+			
+			
+			/**
+			* Function for loading the unique ids of users which are members in the same space
+			*/
+			function preloadMembers(cb){
+				members = [];
+				var mlist = openapp.resource.context(context).sub(openapp.ns.foaf + "member").list();
+				membersNumber = mlist.length ;
+				//alert(membersNumber) ;
+				for (i = 0; i < mlist.length; i++)  {
+				console.log("Member uri list:"+mlist[i].uri);
+					var membersURI = mlist[i].uri ;
+										
+					getEntity(mlist[i].uri, function(mu,mp){
+						members[mu] = mp;
+						console.log(mp);
+						console.log(members.length + " " + mlist.length);
+					})
+				};
+				cb();
+			}
+			
+			/**
+			* Function meant for retrieving the unique identifiers of users,
+			* available in the information section, under "http://www.w3.org/2002/07/owl#sameAs"
+			*/
+			function newGetUsers(){
+				
+				var spaceURI = openapp.param.space();
+				space = new openapp.oo.Resource(spaceURI);
+				
+				
+				space.getSubResources({
+					  relation: openapp.ns.foaf + "member",
+					  onEach: renderEntry
+				});
+				
+			}
+			
+			/**
+			* Function to be called for each discovered member of the space
+			*/
+			function renderEntry(entryResource){ 
+				
+				var entry = new openapp.oo.Resource(entryResource.getURI());
+				entry.getInfo(function(metadata1) {
+					members.push(metadata1["http://www.w3.org/2002/07/owl#sameAs"]);
+					console.log("In the renderEntry call, the members vector is:");
+					console.log(members);
+					
+				if(metadata1["http://www.w3.org/2002/07/owl#sameAs"] !== user.uri){
+						collaborators.push(metadata1["http://www.w3.org/2002/07/owl#sameAs"]);
+				}
+				
+				if(members.length === membersNumber){
+					//start_collaboration();
+				}
+				});
+				
+				//try to solve the case when the collaboration initiation 
+				//is done before the user ids are collected and stored into the members array
+				
+			}
+				
+			
+		
+			
+			function getEntity(uri, cb){
+				openapp.resource.get(uri, function(doc){
+					openapp.resource.context(doc).metadata().get(function(m){
+						cb(m.uri,openapp.resource.content(m).properties());
+					});
+				});
+			}
+			
+			/**
+			* Function used to save the text from the textArea using openApp
+			* a representation element is used for storing the text in json format
+			*/
+			function publishLiteral(){
+			
+				var doc = $("#editArea").val();
+				var currentTime = new Date() ;				
+				var documentText = {"text":doc, "date": currentTime.toString()};
+				space.create({
+					relation: openapp.ns.role + "data",
+					type: "my:ns:documentText",
+					representation: documentText,
+					callback: function(sub){
+						window.location.reload();
+					}
+				});
+			}
+			
+			/**
+			* Function used to create the text using openApp
+			* a representation element is used for storing the text in json format
+			*/
+				function publishLiteral(title){
+			
+				var doc = $("#editArea").val();
+				var textTemp = "";
+				var currentTime = new Date() ;				
+				var documentText = {"title": title, "text": textTemp, "date": currentTime.toGMTString()};
+				space.create({
+					relation: openapp.ns.role + "data",
+					type: "my:ns:documentText",
+					representation: documentText,
+					callback: function(sub){
+						console.log(sub);
+					var intent = {
+						"component": "",
+						"sender": user.uri,  
+						"data": "http://example.org/some/data", 
+						"dataType":"text/json",
+						"action":"EDIT_NEW_TEXT",
+						"flags"	:["PUBLISH_GLOBAL"],
+						"extras": {
+						//"expeditor": userURI,
+						"textTitle":title,
+						"textURI": sub.uri
+					}
+				}
+				sendIntent(intent);
+				window.location.reload();
+					}
+				});
+			} 
+			
+			/**
+			* Function used to delete all text saved in the current space
+			*/
+			function deleteLiterals(){
+				
+				var mlist = openapp.resource.context(context).sub(openapp.ns.role + "data").type("my:ns:documentText").list();
+				for (i = 0; i < mlist.length; i++)  {
+					deleteEntity(mlist[i].uri);
+				};				
+			}
+			
+			/**
+			* Function to get the saved text by providing the uri of the resource, using openApp
+			*/
+			function loadExistingTextFromUri(textUri){
+				a = new openapp.oo.Resource(textUri);
+				a.getRepresentation("rdfjson",function(r){
+							console.log(r);
+							//$('#editArea').val(r.text);
+							loadText(r.title,r.text, user.uri, textUri);
+							});
+				
+			}
+			
+			
+			/**
+			* Function to get the saved text by providing the uri of the resource, using openApp
+			*/
+			function updateExistingText(textUri, title, text){
+				a = new openapp.oo.Resource(textUri);
+				var repr = {"title":title,"text":text, "date": currentTime.toString()}
+				a.setRepresentation(repr,"rdfjson",function(r){
+							//$('#editArea').val(r.text);
+							alert("updated");
+							});
+				
+			}
+		    /**
+			* Function to load and send the chosen text to the collaborators, using openApp
+			*/
+			function loadText(title, text,userURI, textUri){
+				var intent = {
+				  "component": "",
+				  "sender": user.uri,  
+				  "data": "http://example.org/some/data", 
+				  "dataType":"text/json",
+				  "action":"ACTION_LOAD_TEXT",
+				  "flags"	:["PUBLISH_GLOBAL"],
+				  "extras": {
+						"expeditor": userURI,
+						"title":title,
+						"text":text,
+						"textUri": textUri
+					}
+				}
+				sendIntent(intent);
+			}
+			
+			
+			 /**
+			* Function to load and send new text to the collaborators, using openApp
+			*/
+			function newEntity(){
+				
+				 $("#dialog-form" ).dialog( "open" );
+				
+				
+			}
+			/**
+			* Function used for loading all text segments which were saved within the space, using openApp
+			*/
+			function loadExistingText(){
+				
+				space.getSubResources({
+					relation: openapp.ns.role + "data",
+					type: "my:ns:documentText",
+					onEach: function(documentText) {
+							documentText.getRepresentation("rdfjson",function(r){
+							console.log("R IS : !!!!!!!!!!!!!!!!!");
+							console.log(r);
+							var newDiv = $("<li id='"+documentText.uri+"'>" + r.title +"</li> <img src='http://dbis.rwth-aachen.de/~nicolaescu/fw/editor/icon/delete.jpg' height='14' onclick='deleteEntity(\""+documentText.uri+"\")'/> <p style='font-size:0.675em;'> <i>saved on: </i>"+r.date+" </p>");
+							newDiv.appendTo($("#textList"));
+							});
+						}
+					});
+												
+			}
+			
+			
+	
+		
+			
+			
+			
+		
+		</script>
+
+		<div id="createDiv">
+		<img src='http://dbis.rwth-aachen.de/~nicolaescu/fw/editor/icon/newText.jpg' height='24' onclick='newEntity()'/>
+		</div>
+		
+		<div id="dialog-form" title="Create new text">
+		<p class="validateTips">All form fields are required.</p>
+			<fieldset>
+			<label for="name">Title</label>
+			<input type="text" name="texttitle" id="texttitle" class="text ui-widget-content ui-corner-all" />
+			</fieldset>
+		</div>
+		
+		<div id="textDiv"> 
+		<p><b>Saved Text:</b></p>
+			<ul id="textList">	
+			</ul>	
+		</div>				
+		<div id="textDiv"> 
+			<ul id="textList">	
+			</ul>	
+		</div>
+		
+		<div id="messageBox">
+			<div id="contents"></div>
+		</div>
+		
+		<!--		
+		<div id='saveDiv'>
+			<input type="button" id="save" name="save" value="Save" />
+			<input type="button" id="delete" name="delete" value="Delete All" />
+		</div>
+		-->
+			
+		<div id='stats'></div>
+		
+
+	]]>
+	</Content>
+</Module>
